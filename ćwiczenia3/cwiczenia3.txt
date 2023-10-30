@@ -1,0 +1,137 @@
+shp2pgsql.exe "C:\Users\Zuzia\Desktop\BazyDanychPrzestrzennych\cwiczenia3\Cw3_Karlsruhe_Germany_Shapefile\T2018_KAR_GERMANY\T2018_KAR_BUILDINGS.shp" buildings_2018 | psql.exe -h localhost -p 5432 -U postgres -d cwiczenia3
+shp2pgsql.exe "C:\Users\Zuzia\Desktop\BazyDanychPrzestrzennych\cwiczenia3\Cw3_Karlsruhe_Germany_Shapefile\T2018_KAR_GERMANY\T2018_KAR_POI_TABLE.shp" poi_2018 | psql.exe -h localhost -p 5432 -U postgres -d cwiczenia3
+
+-- Zadanie 1
+Create table wybud_wyrem as
+SELECT 
+	t2019.gid AS building_id, 
+	t2019.polygon_id AS polygon_id,
+	t2019.name AS building_name,
+	t2019.type AS building_type,
+	t2019.height AS building_height,
+	t2019.geom as geom
+FROM buildings_2019 AS t2019
+LEFT JOIN 
+	buildings_2018 AS t2018 ON t2019.gid = t2018.gid
+WHERE 
+	t2018.gid IS NULL
+OR NOT 
+	ST_Equals(t2019.geom, t2018.geom);
+
+----------------------------- Zadanie 2
+SELECT ST_SRID(geom)
+FROM wybud_wyrem
+LIMIT 1;
+
+UPDATE wybud_wyrem
+SET geom = ST_SetSRID(geom, 31468);
+
+-- Ile pojawiło się nowych punktów
+SELECT
+    poi_2019.type AS poi_type_2019,
+    COUNT(*) AS poi_count
+FROM poi_2019
+LEFT JOIN poi_2018 
+ON poi_2019.poi_id = poi_2018.poi_id
+WHERE poi_2018.poi_id IS NULL 
+AND EXISTS (
+        SELECT 1
+        FROM wybud_wyrem AS w
+        WHERE ST_DWithin(poi_2019.geom, ST_Buffer(w.geom, 500),0)
+    )
+group by poi_2019.type;
+
+
+------------------------------- Zadanie 3
+-- shp2pgsql.exe "C:\Users\Zuzia\Desktop\BazyDanychPrzestrzennych\cwiczenia3\Cw3_Karlsruhe_Germany_Shapefile\T2019_KAR_GERMANY\T2019_KAR_STREETS.shp" streets_2019 | psql.exe -h localhost -p 5432 -U postgres -d cwiczenia3
+SELECT ST_SRID(geom)
+FROM streets_2019
+LIMIT 1;
+
+-- Dodaj SRID 4326 do kolumny geom w oryginalnej tabeli
+UPDATE streets_2019
+SET geom = ST_SetSRID(geom, 4326);
+
+-- Utwórz tabelę streets_reprojected i skopiuj dane
+SELECT
+    *
+INTO streets_reprojected
+FROM streets_2019;
+
+-- Przekształć geometrię do układu DHDN.Berlin/Cassini
+UPDATE streets_2019
+SET geom = ST_Transform(geom, 31468);
+
+
+------------------------------------------------ Zadanie 4
+
+-- Tworzenie tabeli input_points i dodawanie rekordów
+CREATE table input_points (
+    id serial PRIMARY KEY,
+    geom geometry(Point, 4326)
+);
+
+-- Dodawanie pierwszego punktu
+INSERT INTO input_points (geom)
+VALUES ('POINT(8.36093 49.03174)');
+
+-- Dodawanie drugiego punktu
+INSERT INTO input_points (geom)
+VALUES ('POINT(8.39876 49.00644)');
+
+------------------------------------------------Zadanie 5
+-- Zaktualizuj punkty do układu DHDN.Berlin/Cassini (EPSG:31468)
+
+ALTER TABLE input_points
+ALTER COLUMN geom TYPE geometry(Point, 31468) USING ST_Transform(geom, 31468);
+
+-- żeby sprawdzić
+SELECT ST_SRID(geom)
+FROM input_points
+LIMIT 1;
+
+
+-----------------------------------------------------Zadanie 6
+-- shp2pgsql.exe "C:\Users\Zuzia\Desktop\BazyDanychPrzestrzennych\cwiczenia3\Cw3_Karlsruhe_Germany_Shapefile\T2019_KAR_GERMANY\T2019_KAR_STREET_NODE.shp" node_street_2019 | psql.exe -h localhost -p 5432 -U postgres -d cwiczenia3
+-- Znajdź skrzyżowania w odległości 200 metrów od linii utworzonej z punktów w tabeli 'input_points'
+UPDATE node_street_2019
+SET geom = ST_SetSRID(geom, 31468);
+
+--żeby sprawdzić
+SELECT ST_SRID(geom)
+FROM node_street_2019
+LIMIT 1;
+
+WITH input_line AS (
+    SELECT ST_MakeLine(geom) AS geom
+    FROM input_points
+)
+
+
+SELECT node_street_2019.*
+FROM node_street_2019, input_line
+WHERE ST_DWithin(node_street_2019.geom, ST_Transform(input_line.geom,31468), 200);
+
+
+------------------------------------------------- Zadanie 7
+-- shp2pgsql.exe "C:\Users\Zuzia\Desktop\BazyDanychPrzestrzennych\cwiczenia3\Cw3_Karlsruhe_Germany_Shapefile\T2019_KAR_GERMANY\T2019_KAR_STREET_NODE.shp" node_street_2019 | psql.exe -h localhost -p 5432 -U postgres -d cwiczenia
+select geom from poi_2019 where type like '%Sporting Goods Store%' union all
+select geom from land_use_a_2019
+
+SELECT ST_SRID(geom)
+FROM poi_2019
+LIMIT 1;
+
+UPDATE poi_2019
+SET geom = ST_SetSRID(geom, 31468);
+
+SELECT
+    poi_2019.poi_name AS sport_shop_name,
+    land_use_a_2019.name AS park_name
+FROM poi_2019 
+JOIN land_use_a_2019 ON ST_Intersects(poi_2019.geom, ST_Buffer(land_use_a_2019.geom, 0.003))
+WHERE poi_2019.type = 'Sporting Goods Store';
+
+------------------------------------------- Zadanie 8
+-- shp2pgsql.exe "C:\Users\Zuzia\Desktop\BazyDanychPrzestrzennych\cwiczenia3\Cw3_Karlsruhe_Germany_Shapefile\T2019_KAR_GERMANY\T2019_KAR_RAILWAYS.shp" railways | psql.exe -h localhost -p 5432 -U postgres -d cwiczenia
+
